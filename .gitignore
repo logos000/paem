@@ -1,0 +1,48 @@
+# ---- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ---- secrets ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- build / data artefacts (never published) ---------------------------
+raw-snapshot/
+inbox/
+data/
+logs/
+models/
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+
+# ---- node ---------------------------------------------------------------
+node_modules/
+web/dist/
+
+# ---- tooling ------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ---- binaries -----------------------------------------------------------
+*.exe

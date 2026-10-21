@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the accompanying manuscript."
+title: "PAEM: provenance-anchored evidence materialization for reliable institutional agents"
+type: software
+license: MIT
+repository-code: "https://github.com/logos000/paem"
+keywords:
+  - retrieval-augmented generation
+  - provenance
+  - evidence verification
+  - institutional documents
+  - document materialization
+authors:
+  - family-names: Luo
+    given-names: Shunyang
+version: 1.0.0
+date-released: "2026-10-21"

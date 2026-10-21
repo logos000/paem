@@ -1,0 +1,50 @@
+# Two-service deployment (P4): corpus retrieval runtime + product API.
+# Usage (from academic-affairs-product/deploy):
+#   CORPUS_DIR=E:/Projects/zjui-product/llm-corpus-builder/data/corpus docker compose up -d --build
+# Windows PowerShell:
+#   $env:CORPUS_DIR="E:/Projects/zjui-product/llm-corpus-builder/data/corpus"; docker compose up -d --build
+services:
+  corpus-runtime:
+    build:
+      context: ${BUILDER_DIR:-../../llm-corpus-builder}
+      dockerfile: Dockerfile.runtime
+    volumes:
+      - ${CORPUS_DIR:-../../llm-corpus-builder/data/corpus}:/data/corpus
+      - runtime-service-log:/data/service
+    environment:
+      # 两段式启动在 Docker 里只有第一段：本编排不预热（无 prewarm 步骤），
+      # 首个 hybrid 请求付一次懒加载（约 10-60s）。hybrid 需要挂载 builder 的
+      # models 卷（bge-m3）；没有模型卷时请把 PRODUCT_ARM 设为 sp_lexical。
+      ENGINE_CONFIG: active_ir
+      ENGINE_MAX_CONCURRENCY: "4"
+      RUNTIME_GOVERNANCE_MODE: advisory
+    expose:
+      - "8772"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8772/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  product:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    volumes:
+      - product-logs:/data/logs
+    environment:
+      BUILDER_URL: http://corpus-runtime:8772
+      PRODUCT_ARM: sp
+      RATE_LIMIT_PER_MINUTE: "30"
+      RATE_LIMIT_BURST: "10"
+      MAX_CONCURRENT_ASKS: "8"
+    ports:
+      - "8770:8770"
+    depends_on:
+      corpus-runtime:
+        condition: service_healthy
+
+volumes:
+  runtime-service-log:
+  product-logs:

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/llm-corpus-builder/runtime/answer_context.schema.json",
+  "title": "answer_context payload",
+  "description": "The frozen contract returned by CorpusEngine.answer_context and POST /v1/answer_context. The online product layer must consume this payload as-is; it never re-derives retrieval, applicability, conflict or refusal decisions. Structural authority: runtime.contract.validate_answer_context.",
+  "type": "object",
+  "required": ["version", "question", "config", "query_ir", "user_context", "decision", "pack_hash", "evidence_pack", "provenance", "latency_ms"],
+  "additionalProperties": true,
+  "properties": {
+    "version": { "const": 2, "description": "ANSWER_CONTEXT_VERSION" },
+    "question": { "type": "string", "minLength": 1 },
+    "pack_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 over the canonical pack identity projection (question, query_ir, decision, usable list, evidence identity/content). Same evidence through different retrieval paths = same hash; any evidence/decision change = new hash. Excludes retrieval_trace and timings." },
+    "today": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "config": { "type": "string", "enum": ["raw", "clean", "active", "active_ir", "active_ir_rr", "active_llm_metadata", "active_llm_retrieval_text", "active_llm_validated", "active_llm_validated_ir", "active_llm_metadata_ir", "active_llm_metadata_ir_rr", "active_llm_metadata_ir_rr_raw", "active_llm_validated_ir_rr", "active_dense", "active_hybrid", "active_llm_validated_dense", "active_llm_validated_hybrid"] },
+    "query_ir": {
+      "type": "object",
+      "description": "Merged QueryIR (question parse + rule-R1 user-context fill).",
+      "required": ["raw", "language", "terms", "academic_years", "cohorts", "audience", "course_codes"],
+      "properties": {
+        "raw": { "type": "string" },
+        "language": { "type": "string" },
+        "terms": { "type": "array", "items": { "type": "string" } },
+        "academic_years": { "type": "array", "items": { "type": "string" } },
+        "years": { "type": "array", "items": { "type": "string" } },
+        "cohorts": { "type": "array", "items": { "type": "string" } },
+        "class_standing": { "type": "array", "items": { "type": "integer" } },
+        "audience": { "type": "string" },
+        "topic_audience": { "type": "string" },
+        "institute": { "type": "boolean" },
+        "course_codes": { "type": "array", "items": { "type": "string" } },
+        "intents": { "type": "array", "items": { "type": "string" } },
+        "wants_latest": { "type": "boolean" },
+        "relative_term": { "type": "string" }
+      }
+    },
+    "user_context": { "type": "object", "description": "Echo of the caller-provided user context (non-empty values only)." },
+    "user_context_filled": { "type": "array", "items": { "type": "string" }, "description": "Fields the user context actually contributed (rule R1 audit trail); entries may be 'ignored:<key>' for unknown keys." },
+    "decision": {
+      "type": "object",
+      "required": ["status", "abstain", "reason"],
+      "properties": {
+        "status": { "enum": ["sufficient", "no_material", "wrong_term", "wrong_audience", "stale_or_uncertain", "conflict"] },
+        "abstain": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "evidence_pack": {
+      "type": "object",
+      "description": "The evidence.pack build_evidence_pack output verbatim (evidence items carry provenance/applicability/version sub-objects).",
+      "required": ["query", "query_ir", "evidence", "coverage", "conflicts", "usable_evidence_ids", "evidence_status", "abstain", "abstain_reason"]
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["build_id"],
+      "properties": {
+        "build_id": { "type": "string" },
+        "corpus_root": { "type": "string" },
+        "config": { "type": "string" },
+        "rerank_model": { "type": "string" },
+        "dense_model": { "type": "string" },
+        "n_units": { "type": "integer" },
+        "n_documents": { "type": "integer" },
+        "n_known_conflicts": { "type": "integer" },
+        "gated_arm": { "type": "boolean", "description": "true for the field-level-provenance gated family (active_llm_validated*)" }
+      }
+    },
+    "request_id": { "type": "string", "description": "Present on HTTP responses: caller X-Request-ID or server-generated." },
+    "latency_ms": { "type": "number" }
+  }
+}

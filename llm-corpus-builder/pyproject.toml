@@ -1,0 +1,37 @@
+[project]
+name = "llm-corpus-builder"
+version = "0.1.0"
+description = "LLM-assisted, provenance-preserving, retrieval-ready corpus construction"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "jieba>=0.42",
+    "numpy",
+    "scipy",
+    "beautifulsoup4",
+    "lxml",
+    "pymupdf",
+    "python-docx",
+    "openpyxl",
+    "python-dotenv",
+    "httpx",
+    "pytest>=8",
+]
+
+[project.optional-dependencies]
+# bge/Qwen3 重排器与 dense 嵌入索引（需要 torch；CUDA 轮另装）
+rerank = ["sentence-transformers>=5,<6"]
+# 本地 LLM 标注后端
+annotate = ["transformers>=4.57", "accelerate", "sentence-transformers>=5,<6"]
+# OCR（纯图 PDF）
+ocr = ["rapidocr-onnxruntime"]
+# 公共 benchmark 读取（ViDoRe v3 parquet）
+bench = ["pyarrow"]
+# 查询侧运行时 HTTP 服务（Stage 3A：product 通过 /v1/answer_context 调用）
+service = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.8,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: replays questions against the real crawled corpus and its BM25 index",
+]

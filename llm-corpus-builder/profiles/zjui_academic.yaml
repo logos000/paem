@@ -1,0 +1,245 @@
+# DomainProfile: ZJUI 教务域（查询侧）
+# 证据层架构域无关；本文件是机制层消费的全部领域知识。
+# 正则用 YAML 单引号字符串（反斜杠字面保留）；需要忽略大小写时用
+# {pattern: ..., flags: i} 形式。flags: i = re.I。
+
+meta:
+  name: zjui_academic
+  display: ZJUI 教务问答
+  description: 浙大国际联合学院教务文档（SharePoint 本科教务为主，英文语料 + 中文提问）
+
+# --------------------------------------------------------------- 生成层（产品消费）
+prompt:
+  persona: >-
+    你是教务问答助手。只依据【资料原文】中的证据回答【用户问题】。
+    引用方式：在回答文本中，每个事实性句子的结尾紧跟引用标记（形如 [E1]、[E2]，对应资料中证据的编号），
+    一个句子可以引用多条证据（如 [E1][E3]）。
+    关键红线：【资料原文】中没有问题所问的具体信息（如具体数字、日期、课程安排）时，必须在回答中明确说明
+    「证据中未包含该信息」并指出证据里实际有什么，禁止用你自己的知识、常识或猜测补全——这比不回答严重得多。
+    不得改写日期、数字或课程代码。允许依据原文明确条件进行合取、比较和逻辑推断，须引用所有必要前提；
+    不得猜测政策动机、未写明的禁止或例外，也不得将未标明含义的括号数字断言为容量上限。
+    先直接回答问题的各个要点；缺失的要点单独说明，不要用大量无关材料替代答案。
+    证据编号旁《》内是该证据所属文档的标题（含学期/年份标注）：判断证据适用学期、对象和范围时必须使用它，
+    不得因块文本内未重复学期/年份而质疑其适用性。
+    对【资料原文】中确实存在且你已引用的信息，必须直接给出该事实；
+    禁止对已引用证据所支持的内容说「证据中未包含」——正确做法是先陈述该事实并引用，再单独说明其余未覆盖的要点。
+    部分可答时 answer_disposition=partial_answer；整体证据不足时 refusal=true 且 answer_disposition=evidence_refusal。
+    只有需要用户补充学期/对象等信息时用clarify。拒绝伪造、冒用身份或泄露他人隐私的请求，
+    同时可提供合法申诉或按政策办理的替代方案；普通补交或协助申请不能自动视为违规。
+    若证据存在冲突，必须同时呈现双方说法并分别引用，不得只取一方。
+
+# --------------------------------------------------------------- 事实锚点
+anchors:
+  course_code: '\b([A-Z]{2,5} ?\d{2,4}[A-Za-z]{0,3})\b'
+  # 看似课程码实为学期键/序号的前缀：命中则不计为课程码锚点
+  course_code_ignored_prefixes: [fa, sp, su, wi, fall, spring, summer, winter, class, of,
+                                 semester, sem, term, week, room, page]
+
+# --------------------------------------------------------------- 校历与日期
+calendar:
+  bare_year: '(?:19|20)\d{2}'
+  question_date_zh: '(20\d{2})\s*年\s*(\d{1,2})\s*月'
+  question_date_iso: '(20\d{2})[-/](\d{1,2})[-/]\d{1,2}'
+  question_date_en: {pattern: '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(20\d{2})', flags: i}
+  # 学期键解析："2024-fall" / "2024spring" / "2024"
+  term_parse: '(20\d{2})[-\s]?(spring|fall|autumn|summer|winter)?'
+  seasons_spring: [spring]
+  seasons_fall: [fall, autumn]
+  # 相对学期词（parse_query 用 today 换算成学期键）。current=硬解析（本学期）；
+  # latest=软解析：ir.terms 偏置检索通道，wants_latest 使 pack 级硬过滤保持关闭，
+  # "最新的<旧系列文档>"不会被当前学期过滤排除（2026-10-17 curr-01 盲区修复）。
+  # 注意只收"学期语义"词：最近/当前/目前/now 是流程相对词，不指向学期
+  # （"按指南目前还缺什么"曾误触发——275 题门禁 sm-0208 抓住后移除）
+  relative_current: [本学期, 这学期, this semester, current semester]
+  relative_latest: [最新, 现行, 今年, 最新版, latest, this year, up to date]
+  relative_next: [下学期, 下个学期, next semester, next term]
+  # 事件归属窗口（月份感知，跨年学期）：
+  # prev = 学年前一年的月份（如春季学期的 12 月注册期），next = 学年次年的月份（秋季学期 1 月考试尾巴）
+  windows:
+    spring: {prev: [12], same: [1, 2, 3, 4, 5, 6, 7], next: []}
+    fall: {prev: [], same: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], next: [1]}
+    bare: {prev: [], same: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], next: []}
+  # 词面日期桥接（问题里的全日期 → 语料惯用写法的检索变体）
+  full_date_zh: '(20\d{2})年(\d{1,2})月(\d{1,2})日?'
+  full_date_iso: '(20\d{2})[-/](\d{1,2})[-/](\d{1,2})'
+  full_date_en: {pattern: '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})', flags: i}
+
+# --------------------------------------------------------------- 跨语别名桥（查询侧确定性，2026-10-18）
+# BM25 对中文问题×英文语料天然哑火（zh token 与英文文档零匹配），dense 单通道
+# 独裁时释义型对应（"退课截止日期" vs "submit a request by the end of 8th week"）
+# 常排不过学期匹配的课表/课程清单。此表把高频教务词的英文对应词在查询变体池
+# 里追加为 retrieval-only 变体（与日期变体/最新学期词面桥同一机制同一位置）。
+# 触发条件：问题含 keys 任一词 → 追加 terms 词面变体；英文问题不触发（零漂移）。
+# ECE↔计算机工程↔CompE 同物异名是用户裁决（2026-10-18：用户语境 ECE 专业=计算机工程）。
+aliases:
+  - keys: [计算机工程, ECE专业, ECE 专业, CompE]
+    terms: [Computer Engineering, CompE]
+  - keys: [电气工程, EE专业]
+    terms: [Electrical Engineering]
+  - keys: [机械工程]
+    terms: [Mechanical Engineering]
+  - keys: [土木工程]
+    terms: [Civil Engineering]
+  - keys: [退课, 撤课]
+    terms: [course drop, withdraw, withdrawal deadline]
+  - keys: [选课, 注册课程, 选修课程]
+    terms: [course registration, enrollment]
+  - keys: [课表, 课程表]
+    terms: [class schedule, timetable]
+  - keys: [先修课, 先修要求, 先修]
+    terms: [prerequisite, prerequisites]
+  - keys: [期末考试, 考试安排]
+    terms: [final exam, exam schedule]
+  - keys: [学分]
+    terms: [credit, credits, AU]
+  - keys: [培养方案, 教学计划]
+    terms: [curriculum, program plan]
+  - keys: [截止日期, 截止时间, deadline]
+    terms: [deadline]
+
+# --------------------------------------------------------------- 受众
+audience:
+  undergraduate_markers: [undergrad, 本科]
+  graduate_markers: [graduate, postgrad, 硕士, 博士, phd]
+  faculty_markers: [faculty, teacher, instructor, 教师, 教职工]
+
+# --------------------------------------------------------------- 小节折叠族（按特异性排序）
+fold_families:
+  - name: curriculum
+    mode: section
+    skip_if_anchor: false
+    label_preference: 'required courses'
+    trigger:
+      {pattern: '哪些(?:必修|核心|选修|基础|专业)课|(?:必修|核心|选修|基础|专业)课(?:程)?(?:清单|列表|有哪些|包括|都有哪)|课(?:程)?(?:清单|列表)|都有(?:哪些|什么)课|(?:要|需|得)修(?:哪些|什么)课|(?:required|core|mandatory|elective)\s+courses|list\s+(?:of\s+)?(?:all\s+|the\s+)?(?:required\s+|core\s+|elective\s+)?courses|which\s+courses|what\s+courses|all\s+(?:the\s+)?(?:required|core)\s+courses', flags: i}
+    row: {pattern: 'Course Code\s*[:：]', flags: i}
+  - name: class_number
+    mode: section
+    skip_if_anchor: true
+    label_preference: ''
+    trigger:
+      {pattern: '课号(?:清单|列表|有哪些|是什么)|哪些课号|班级号|class\s*number|course\s*class\s*numbers?', flags: i}
+    row: '^[A-Z]{2,5} ?\d{2,4}[A-Za-z0-9*]*\s*\|'
+  - name: exam_schedule
+    mode: section
+    skip_if_anchor: true
+    label_preference: ''
+    trigger:
+      {pattern: '所有(?:期末)?考试|哪些考试|考试安排表|期末考试(?:安排|时间表)(?:都)?(?:有哪些|是什么)?|exam\s+schedule|final\s+exams?\s+(?:schedule|list|arrangement)|list\s+of\s+exams', flags: i}
+    row: {pattern: '^No\.\s*:?\s*\d+\s*\|', flags: i}
+  - name: prerequisites
+    mode: filter
+    skip_if_anchor: false
+    label_preference: ''
+    trigger:
+      {pattern: '(?:哪些课|什么课|哪些课程).{0,16}先修|先修.{0,12}(?:哪些课|哪些课程)|prerequisites?\s+(?:list|of which)|which\s+courses\s+(?:have|require|list|need)\s+(?:.*\s)?prerequisites?', flags: i}
+    row: {pattern: '^Number:\s*[A-Z]{2,5} ?\d', flags: i}
+
+# --------------------------------------------------------------- 邻块缝合
+stitch:
+  dangling_end: '[：:，,]\s*$|如下\s*$'
+  dangling_start: '^(?:此外|上述|其中|另外|特殊情况|同时|若|否则|例如|即|但是|前述)'
+  max_neighbor_chars: 600
+
+# 文档内补全（2026-10-17 sm-0082 类缺口）：正确文档排到第 1，但含事实的兄弟块与
+# 问题几乎无词面重合、三通道都进不了 top-50。装包后把该文档的兄弟块按阅读序并入
+# 首个入包条目（预算封顶），生成器因此能看到并引用该事实；排名/限额/覆盖/决策不动。
+doc_completion:
+  max_chars: 1200   # 每文档并入的额外字符预算
+  max_docs: 4       # 每个包最多补全的文档数（最坏 +4×1200 字符）
+
+# --------------------------------------------------------------- 生成后事实校验（产品消费）
+claim_validation:
+  iso_date: '\b(?:19|20)\d{2}[-/]\d{1,2}[-/]\d{1,2}\b'
+  zh_date: '(?:19|20)\d{2}年\d{1,2}月\d{1,2}日'
+  zh_date_noyear: '(?<!\d)(?:1[0-2]|0?[1-9])月(?:[12]?\d|3[01])日'
+  en_date: {pattern: '\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:\d{1,2}[:.]\d{2}|\d{1,2}\s*[ap]\.?m\.?))?(?:,?\s+(?:19|20)\d{2})?', flags: i}
+  time: {pattern: '\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s?[ap]\.?m\.?', flags: i}
+  year: '\b(?:19|20)\d{2}\b'
+  course_code: '\b[A-Za-z]{2,}[ -]?\d{2,}[A-Za-z0-9-]*\b'
+  # 月份残片（全日期匹配后的余料，不得当裸数字）
+  month_fragment: {pattern: '(?<!\d)\d{1,2}\s*月|(?<![\d月])\d{1,2}日|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?', flags: i}
+  # 单位词 → 单位类（同值跨写法等价：8周 == 8 weeks；不同类不相容：8周 vs 8天）
+  unit_words:
+    week: [周, week, weeks]
+    day: [天, day, days]
+    hour: [小时, hour, hours]
+    minute: [分钟, minute, minutes]
+    credit: [学分, credit, credits, au, aus]   # AU 是本域学分惯用语，单位换算不算编造
+    point: [分, point, points]
+    percent: ['%', ％, percent]
+    person: [人, 名]
+    course: [门]
+    time: [次]
+  # 看似课程码的学期/序号写法（claim 与证据可各自书写，直接豁免）
+  term_code_prefixes: [fa, sp, su, wi, fall, spring, summer, winter, class, of,
+                       semester, sem, term, week, room, page]
+
+# --------------------------------------------------------------- 构建侧（builder 消费）
+build:
+  # 站点 → 受众/层级/权威（爬虫适配器另列于 ingest；此处是内容治理语义）
+  sites:
+    gfxwj: {audience: public, scope_level: university, tier: core, publisher: 浙江大学（校长办公室规范性文件库）, authority: 5}
+    sharepoint: {audience: zjui_undergraduate, scope_level: institute, tier: core, publisher: ZJUI Undergraduate Academic Affairs Office, authority: 4}
+    zjui: {audience: zjui_undergraduate, scope_level: institute, tier: core, publisher: ZJU-UIUC Institute, authority: 4}
+    ugrs: {audience: undergraduate, scope_level: university, tier: core, publisher: 浙江大学本科生院, authority: 4}
+    bksy: {audience: undergraduate, scope_level: university, tier: core, publisher: 浙江大学本科生院, authority: 4}
+    grs: {audience: graduate, scope_level: university, tier: distractor, publisher: 浙江大学研究生院, authority: 4}
+    zju: {audience: public, scope_level: university, tier: distractor, publisher: 浙江大学, authority: 3}
+    news: {audience: public, scope_level: university, tier: distractor, publisher: 浙江大学新闻网, authority: 1}
+    libweb: {audience: public, scope_level: university, tier: distractor, publisher: 浙江大学图书馆, authority: 2}
+    iczu: {audience: public, scope_level: school, tier: distractor, publisher: 浙江大学国际教育学院, authority: 3}
+    zibs: {audience: public, scope_level: school, tier: distractor, publisher: 浙江大学国际联合商学院, authority: 2}
+    external: {audience: public, scope_level: university, tier: distractor, publisher: external, authority: 1}
+  # 文档类型（有序，先命中先用；标题规则先于正文规则）
+  doc_type_rules:
+    - [calendar, '校历|教学日历|academic\s+calendar|\bcalendar\b']
+    - [exam_schedule, '考试安排|考试时间|exam(?:ination)?\s+(?:schedule|arrangement)']
+    - [schedule, '课表|课程表|class\s+schedule|class\s+number|courses?\s+in\s+(?:fall|spring|summer)|时间表']
+    - [regulation, '管理办法|实施办法|暂行办法|规定|条例|细则|章程|守则|规则|regulations?|polic(?:y|ies)|\brules\b']
+    - [program_plan, '培养方案|教学计划|专业介绍|academic\s+program\s+plan|curriculum|prerequisite|degree\s+requirement']
+    - [guide, '指南|须知|流程|手册|说明|问答|guide|handbook|faq|how\s+to|instruction|procedure']
+    - [form, '申请表|登记表|审批表|汇总表|表格|模板|\bform\b|template']
+    - [notice, '通知|公告|公示|通告|名单|结果|notice|announcement|application\s+for']
+    - [news, '新闻|报道|活动|讲座|会议|举行|召开|开展|news|seminar|lecture|喜报|荣获|获奖|来访|到访|访问|调研|签署|签约|战略合作|就职|称号|讲堂|工作坊|展览|exhibition|大会|研究成果|发表|publish|师生|年报|年终总结']
+  authority_by_type: {regulation: 5, calendar: 5, program_plan: 5, exam_schedule: 4, schedule: 4, guide: 4, notice: 3, form: 2, news: 1, page: 2, listing: 0}
+  audience_titles:
+    faculty: '教师|教职工|师资|教改|教学研究|教学改革|课程建设|教学成果|名师|职称|教学竞赛|教研|教学项目|博士后|教师招聘|人才招聘|人才引进|招聘|岗位|薪酬|待遇|faculty|instructor|postdoc'
+    graduate: '研究生|硕士|博士|导师|postgraduate|graduate\s+student|ph\.?d|master''?s'
+    undergraduate: '本科|undergrad'
+    exchange: '交流|交换|海外|访学|夏令营|暑期学校|summer\s+school|exchange|study\s+abroad|国际化|联合培养'
+  college_marker: '(?<!本科生)(?<!研究生)(?<!继续教育)学院(?!路)'
+  program_marker: {pattern: '专业|program\s+plan|curriculum|(?:civil|electrical|computer|mechanical)\s+engineering', flags: i}
+  course_marker: 'syllabus|课程大纲|教学大纲|\b[A-Z]{2,5}\s?\d{3}\b'
+  effective_cn: '自?\s*((?:19|20)\d{2}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\s*起\s*(?:施行|实施|生效)'
+  effective_en: {pattern: 'effective\s+(?:from|as\s+of)?\s*((?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2})', flags: i}
+  doc_number: '〔\[\〔?\d{4}\〕?\〕?\]?\s*\d{1,4}\s*号'
+
+  # 版本系列 key 剥离规则（有序合并为一个 alternation）
+  series_strip:
+    - '(?:19|20)\d{2}\s*[-—–~至/]\s*(?:19|20)?\d{2}\s*学年(?:第[一二12]学期)?'
+    - '(?:19|20)\d{2}\s*年?\s*(?:春夏|秋冬|春|夏|秋|冬)(?:季)?(?:学期)?'
+    - '(?:春夏|秋冬|春季|秋季|夏季|冬季)(?:学期)?'
+    - '\b(?:spring|summer|fall|autumn|winter)(?:\s+(?:semester|term))?\b'
+    - '(?<![A-Za-z])(?:SP|SU|FA|WI)[\s_-]?(?:20)?\d{2}(?!\d)'
+    - '(?<!\d)(?:20)?\d{2}[\s_-]?(?:SP|SU|FA|WI)(?![A-Za-z])'
+    - '\bAY\s*\d{2,4}\s*[-/]\s*\d{2,4}\b'
+    - '(?<!\d)(?:19|20)\d{2}\s*年?'
+    - '(?<!\d)\d{2}-\d{2}(?!\d)'
+    - '\bV\s?\d+(?:\.\d+)?\b'
+    - '[（(]\s*\d+\s*[)）]'
+    - '\b(?:final|draft|online|new|updated|revised|with\s+rooms|semester|term|version)\b'
+    - '第[一二三四五六七八九十\d]+(?:批|期|轮|次)'
+    - '(?:最终版|修订版|更新版|征求意见稿|草案|正式版)'
+  series_version: {pattern: '\bV\s?(\d+(?:\.\d+)?)\b|[（(]\s*(\d+)\s*[)）]', flags: i}
+  series_cohort: 'class\s+of\s+((?:19|20)\d{2})|((?:19|20)\d{2})\s*级'
+  series_generic_key: '^(?:预览\s*pdf|class\s+schedule|course\s+(?:number|list|offerings?)|schedule|calendar|guide|form|notice|page|list|课表|课程表|日历|教学日历|指南|通知|名单|表格)$'
+
+  # 冲突检测：事实抽取模式（deadline/credits/contact/quota/condition 五类）
+  conflicts:
+    deadline_date: {pattern: '(?:19|20)\d{2}[年./-]\s*\d{1,2}[月./-]\s*\d{1,2}日?|\d{4}-\d{1,2}-\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+(?:19|20)\d{2})?', flags: i}
+    deadline_hint: {pattern: '截止|deadline|之前提交|due|申请时间|报名时间', flags: i}
+    credits: {pattern: '(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*(?:个)?(?:学分|credits?)(?![A-Za-z])', flags: i}
+    email: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    phone: '(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}|0571[- ]?\d{8}(?!\d)'
+    quota: '(?<![0-9])(\d+)\s*(?:个|名|人)?(?:名额|席位|名额数)|名额(?:为|：|:)\s*(\d+)'
+    gpa: {pattern: '(?<![A-Za-z0-9])(?:GPA|绩点|平均绩点)[^\d\n]{0,8}(\d(?:\.\d+)?)', flags: i}

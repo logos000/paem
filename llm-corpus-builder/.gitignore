@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+# 语料产物、爬取数据、模型权重一律不进 git
+data/
+models/
